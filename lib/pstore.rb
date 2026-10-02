@@ -739,3 +739,5 @@ class PStore
     EMPTY_MARSHAL_CHECKSUM
   end
 end
+
+require_relative "pstore/multi_transaction"
