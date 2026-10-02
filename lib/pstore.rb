@@ -553,15 +553,7 @@ class PStore
   # Raises an exception if called within a transaction block.
   def transaction(read_only = false)  # :yields:  pstore
     value = nil
-    if !@thread_safe
-      raise PStore::Error, "nested transaction" unless @lock.try_lock
-    else
-      begin
-        @lock.lock
-      rescue ThreadError
-        raise PStore::Error, "nested transaction"
-      end
-    end
+    lock_for_transaction
     begin
       @rdonly = read_only
       @abort = false
@@ -595,6 +587,38 @@ class PStore
 
   private
   # :stopdoc:
+
+  def lock_for_transaction
+    if !@thread_safe
+      raise PStore::Error, "nested transaction" unless @lock.try_lock
+    else
+      begin
+        @lock.lock
+      rescue ThreadError
+        raise PStore::Error, "nested transaction"
+      end
+    end
+  end
+
+  def begin_coordinated_transaction(read_only)
+    lock_for_transaction
+    begin
+      @rdonly = read_only
+      @abort = false
+      open_and_lock_file(@filename, read_only)
+    rescue Exception
+      @lock.unlock if @lock.owned?
+      raise
+    end
+  end
+
+  def end_coordinated_transaction(file)
+    begin
+      file.close if file
+    ensure
+      @lock.unlock if @lock.owned?
+    end
+  end
 
   # Constant for relieving Ruby's garbage collector.
   CHECKSUM_ALGO = %w[SHA512 SHA384 SHA256 SHA1 RMD160 MD5].each do |algo|
@@ -677,6 +701,18 @@ class PStore
     end
   end
 
+  def load_coordinated_table(file)
+    file.rewind
+    data = file.read
+    if data.empty?
+      table = {}
+    else
+      table = load(data)
+      raise Error, "PStore file seems to be corrupted." unless table.is_a?(Hash)
+    end
+    [table, data]
+  end
+
   ON_WINDOWS = true & (/mswin|mingw|bccwin|wince/ =~ RUBY_PLATFORM) # :nodoc:
   private_constant :ON_WINDOWS
 
@@ -739,3 +775,5 @@ class PStore
     EMPTY_MARSHAL_CHECKSUM
   end
 end
+
+require_relative "pstore/coordinator"

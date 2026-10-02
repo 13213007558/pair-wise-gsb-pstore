@@ -84,6 +84,31 @@ wiki.transaction(true) do  # begin read-only transaction, no changes allowed
 end
 ```
 
+### Coordinating multiple store files
+
+Use `PStore::Coordinator` when several PStore files must present one atomic
+transition to callers. It fixes a group of paths, acquires locks in path order,
+writes prepared copies and a durable commit decision, then recovers all stores
+to either their old or new values after a process crash.
+
+```ruby
+require "pstore"
+
+coordinator = PStore::Coordinator.new(["inventory.pstore", "reservations.pstore"])
+coordinator.transaction do |inventory, reservations|
+  inventory[:seat_count] -= 1
+  reservations[:held_seats] << customer_id
+end
+
+# Run this after restarting a process; it is safe to call it repeatedly.
+coordinator.recover
+```
+
+Single-file `PStore#transaction` keeps its existing behavior and does not use
+the coordinator's recovery directory. Recovery raises `PStore::Error` when
+required journal or prepared data is missing or corrupt rather than guessing
+the missing file's contents.
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake test` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
